@@ -1,0 +1,676 @@
+//@version=6
+indicator("All-in-One: MA / BB / Ichimoku / PivotZones / QQE (v6)", overlay=true, max_labels_count=500, max_lines_count=500)
+
+// ==============================
+// A. Master Toggles
+// ==============================
+groupMaster = "A: Master Toggles"
+show_ma    = input.bool(true,  "Show Moving Averages", group=groupMaster)
+show_bb    = input.bool(true,  "Show Bollinger Bands", group=groupMaster)
+show_ichi  = input.bool(true,  "Show Ichimoku",        group=groupMaster)
+show_pivot = input.bool(true,  "Show PivotZones",      group=groupMaster)
+show_qqe   = input.bool(true,  "Show QQE",             group=groupMaster)
+
+// Common colors
+var deep_pink = color.rgb(255, 20, 147)
+var bisque    = color.rgb(255, 228, 196)
+
+// Helper: label size (used by Pivot)
+getLabelSize(string s) =>
+    switch s
+        "tiny"   => size.tiny
+        "small"  => size.small
+        "normal" => size.normal
+        "large"  => size.large
+        => size.normal
+
+// ==============================
+// G. QQE signals (v6)
+// ==============================
+groupQQE = "G: QQE"
+RSI_Period = input.int(14, title='RSI Length', group=groupQQE, minval=1)
+SF         = input.int(5,  title='RSI Smoothing', group=groupQQE, minval=1)
+QQE_factor = input.float(4.238, title='Fast QQE Factor', group=groupQQE, step=0.001)
+ThreshHold = input.int(10, title='Thresh-hold', group=groupQQE)
+
+// visibility & style
+groupQQEVis = "G1: QQE Visibility"
+show_qqe_long  = input.bool(true,  "Show Long labels",  group=groupQQEVis)
+show_qqe_short = input.bool(true,  "Show Short labels", group=groupQQEVis)
+qqe_long_color  = input.color(color.rgb(0,77,64),  title="Long Label Color",  group=groupQQEVis) // Teal 900
+qqe_short_color = input.color(color.rgb(136,14,79), title="Short Label Color", group=groupQQEVis) // Pink 900
+qqe_size = input.string("tiny", title="QQE Label Size", options=["tiny","small","normal","large"], group=groupQQEVis)
+qqe_is_tiny   = qqe_size == "tiny"
+qqe_is_small  = qqe_size == "small"
+qqe_is_normal = qqe_size == "normal"
+qqe_is_large  = qqe_size == "large"
+
+// calc
+a_src = close
+Wilders_Period = RSI_Period * 2 - 1
+Rsi   = ta.rsi(a_src, RSI_Period)
+RsiMa = ta.ema(Rsi, SF)
+AtrRsi   = math.abs(RsiMa[1] - RsiMa)
+MaAtrRsi = ta.ema(AtrRsi, Wilders_Period)
+dar = ta.ema(MaAtrRsi, Wilders_Period) * QQE_factor
+
+var float longband  = na
+var float shortband = na
+var int   trend     = 1
+
+DeltaFastAtrRsi = dar
+RSIndex   = RsiMa
+newshortband = RSIndex + DeltaFastAtrRsi
+newlongband  = RSIndex - DeltaFastAtrRsi
+
+if not na(longband[1]) and RSIndex[1] > longband[1] and RSIndex > longband[1]
+    longband := math.max(longband[1], newlongband)
+else
+    longband := newlongband
+
+if not na(shortband[1]) and RSIndex[1] < shortband[1] and RSIndex < shortband[1]
+    shortband := math.min(shortband[1], newshortband)
+else
+    shortband := newshortband
+
+cross_1 = ta.cross(longband[1], RSIndex)
+trend := ta.cross(RSIndex, shortband[1]) ? 1 : (cross_1 ? -1 : nz(trend[1], 1))
+FastAtrRsiTL = trend == 1 ? longband : shortband
+
+var int QQExlong  = 0
+var int QQExshort = 0
+QQExlong  := FastAtrRsiTL < RSIndex ? nz(QQExlong[1])  + 1 : 0
+QQExshort := FastAtrRsiTL > RSIndex ? nz(QQExshort[1]) + 1 : 0
+
+qqeLong  = QQExlong == 1
+qqeShort = QQExshort == 1
+
+// plots (size constants)
+plotshape(qqeLong and qqe_is_tiny,   title="QQE long (tiny)",  text="Long",  textcolor=color.white, style=shape.labelup,   location=location.belowbar, color=qqe_long_color,  size=size.tiny,  display= show_qqe and show_qqe_long ? display.all : display.none)
+plotshape(qqeLong and qqe_is_small,  title="QQE long (small)", text="Long",  textcolor=color.white, style=shape.labelup,   location=location.belowbar, color=qqe_long_color,  size=size.small, display= show_qqe and show_qqe_long ? display.all : display.none)
+plotshape(qqeLong and qqe_is_normal, title="QQE long (normal)",text="Long",  textcolor=color.white, style=shape.labelup,   location=location.belowbar, color=qqe_long_color,  size=size.normal,display= show_qqe and show_qqe_long ? display.all : display.none)
+plotshape(qqeLong and qqe_is_large,  title="QQE long (large)", text="Long",  textcolor=color.white, style=shape.labelup,   location=location.belowbar, color=qqe_long_color,  size=size.large, display= show_qqe and show_qqe_long ? display.all : display.none)
+
+plotshape(qqeShort and qqe_is_tiny,   title="QQE short (tiny)",  text="Short", textcolor=color.white, style=shape.labeldown, location=location.abovebar, color=qqe_short_color, size=size.tiny,  display= show_qqe and show_qqe_short ? display.all : display.none)
+plotshape(qqeShort and qqe_is_small,  title="QQE short (small)", text="Short", textcolor=color.white, style=shape.labeldown, location=location.abovebar, color=qqe_short_color, size=size.small, display= show_qqe and show_qqe_short ? display.all : display.none)
+plotshape(qqeShort and qqe_is_normal, title="QQE short (normal)",text="Short", textcolor=color.white, style=shape.labeldown, location=location.abovebar, color=qqe_short_color, size=size.normal,display= show_qqe and show_qqe_short ? display.all : display.none)
+plotshape(qqeShort and qqe_is_large,  title="QQE short (large)", text="Short", textcolor=color.white, style=shape.labeldown, location=location.abovebar, color=qqe_short_color, size=size.large, display= show_qqe and show_qqe_short ? display.all : display.none)
+
+alertcondition(qqeLong,  title="QQE Long",  message="QQE Long")
+alertcondition(qqeShort, title="QQE Short", message="QQE Short")
+
+// ==============================
+// G2: QQE Alerts (inline alert() calls)
+// ==============================
+groupQQEAlert = "G2: QQE Alerts"
+qqe_enable_alerts     = input.bool(true,  "Enable QQE alert()",         group=groupQQEAlert)
+qqe_alert_only_close  = input.bool(true,  "Only on bar close",          group=groupQQEAlert)
+qqe_alert_long        = input.bool(true,  "Alert on LONG signal",       group=groupQQEAlert)
+qqe_alert_short       = input.bool(true,  "Alert on SHORT signal",      group=groupQQEAlert)
+qqe_alert_prefix      = input.string("QQE","Alert message prefix",      group=groupQQEAlert)
+qqe_flash_bg          = input.bool(false, "Flash background on alerts", group=groupQQEAlert)
+
+// トリガ（表示トグル/確定足オプション/個別ONに連動）
+qqeLong_trig  = show_qqe and qqe_enable_alerts and qqe_alert_long  and qqeLong  and (not qqe_alert_only_close or barstate.isconfirmed)
+qqeShort_trig = show_qqe and qqe_enable_alerts and qqe_alert_short and qqeShort and (not qqe_alert_only_close or barstate.isconfirmed)
+
+// 動的メッセージ（銘柄/価格/時間足）
+_alert_msg(dir) =>
+    qqe_alert_prefix + " " + dir + " " + syminfo.ticker + " @" + str.tostring(close, format.mintick) + " TF=" + timeframe.period
+
+// alert() 発火（確定足のみ or 確定前も許可）
+if qqeLong_trig
+    if qqe_alert_only_close
+        alert(_alert_msg("LONG"),  alert.freq_once_per_bar_close)
+    else
+        alert(_alert_msg("LONG"),  alert.freq_once_per_bar)
+
+if qqeShort_trig
+    if qqe_alert_only_close
+        alert(_alert_msg("SHORT"), alert.freq_once_per_bar_close)
+    else
+        alert(_alert_msg("SHORT"), alert.freq_once_per_bar)
+
+// 視覚的認知（任意）：バー背景を一瞬点滅
+bgcolor(qqe_flash_bg and qqeLong_trig  ? color.new(color.teal,  85) : na)
+bgcolor(qqe_flash_bg and qqeShort_trig ? color.new(color.fuchsia,85) : na)
+
+// ==============================
+// C. Bollinger Bands (±2σ / ±3σ)
+// ==============================
+groupBB = "C: Bollinger Bands"
+bb_length = input.int(20, "BB Length", group=groupBB, minval=1)
+bb_mult2  = input.float(2.0, "Std Mult (±2σ)", group=groupBB, step=0.1)
+bb_mult3  = input.float(3.0, "Std Mult (±3σ)", group=groupBB, step=0.1)
+
+// per-line visibility
+groupBBVis = "C1: BB Visibility"
+show_bb_basis = input.bool(true,  "Show Basis", group=groupBBVis)
+show_bb_u2    = input.bool(true,  "Show +2σ",   group=groupBBVis)
+show_bb_l2    = input.bool(true,  "Show -2σ",   group=groupBBVis)
+show_bb_u3    = input.bool(false, "Show +3σ",   group=groupBBVis)
+show_bb_l3    = input.bool(false, "Show -3σ",   group=groupBBVis)
+
+bb_basis = ta.sma(close, bb_length)
+bb_dev2  = bb_mult2 * ta.stdev(close, bb_length)
+bb_upper2 = bb_basis + bb_dev2
+bb_lower2 = bb_basis - bb_dev2
+bb_dev3  = bb_mult3 * ta.stdev(close, bb_length)
+bb_upper3 = bb_basis + bb_dev3
+bb_lower3 = bb_basis - bb_dev3
+
+plot(bb_basis,  color=color.red,   linewidth=2, title="BB Basis", display= show_bb and show_bb_basis ? display.all : display.none)
+plot(bb_upper2, color=color.lime,  linewidth=2, title="BB +2σ",   display= show_bb and show_bb_u2    ? display.all : display.none)
+plot(bb_lower2, color=color.lime,  linewidth=2, title="BB -2σ",   display= show_bb and show_bb_l2    ? display.all : display.none)
+plot(bb_upper3, color=color.aqua,  linewidth=2, title="BB +3σ",   display= show_bb and show_bb_u3    ? display.all : display.none)
+plot(bb_lower3, color=color.aqua,  linewidth=2, title="BB -3σ",   display= show_bb and show_bb_l3    ? display.all : display.none)
+
+// ==============================
+// F. PivotZones (dark-theme tuned) - Daily (既存)
+// ==============================
+
+groupPZ = "F: PivotZones"
+PivotTerm          = input.timeframe("D", title="Pivot Timeframe", group=groupPZ)
+pivotLineStyleR2   = input.string("solid",  title="Line Style R2",  options=["solid","dotted","dashed"], group=groupPZ)
+pivotLineStyleR1a  = input.string("solid",  title="Line Style R1'", options=["solid","dotted","dashed"], group=groupPZ)
+pivotLineStyleR1   = input.string("solid",  title="Line Style R1",  options=["solid","dotted","dashed"], group=groupPZ)
+pivotLineStyleBP   = input.string("dashed", title="Line Style BP",  options=["solid","dotted","dashed"], group=groupPZ)
+pivotLineStyleS1   = input.string("solid",  title="Line Style S1",  options=["solid","dotted","dashed"], group=groupPZ)
+pivotLineStyleS1a  = input.string("solid",  title="Line Style S1'", options=["solid","dotted","dashed"], group=groupPZ)
+pivotLineStyleS2   = input.string("solid",  title="Line Style S2",  options=["solid","dotted","dashed"], group=groupPZ)
+
+// ★重要：input.color の defval は const color が必要。
+// そのため「デフォルト色」を const として先に定義して使い回す（週足側の defval でも使用可能にする）。
+const color DEF_PZ_R2  = color.rgb(100,255,218)
+const color DEF_PZ_R1A = color.rgb(167,255,235)
+const color DEF_PZ_R1  = color.rgb(100,255,218)
+const color DEF_PZ_BP  = color.rgb(255,183,77)
+const color DEF_PZ_S1  = color.rgb(197,168,255)
+const color DEF_PZ_S1A = color.rgb(224,176,255)
+const color DEF_PZ_S2  = color.rgb(179,136,255)
+
+pivotLineColorR2 = input.color(DEF_PZ_R2,  title="Color R2",  group=groupPZ)
+pivotLineColorR1a= input.color(DEF_PZ_R1A, title="Color R1'", group=groupPZ)
+pivotLineColorR1 = input.color(DEF_PZ_R1,  title="Color R1",  group=groupPZ)
+pivotLineColorBP = input.color(DEF_PZ_BP,  title="Color BP",  group=groupPZ)
+pivotLineColorS1 = input.color(DEF_PZ_S1,  title="Color S1",  group=groupPZ)
+pivotLineColorS1a= input.color(DEF_PZ_S1A, title="Color S1'", group=groupPZ)
+pivotLineColorS2 = input.color(DEF_PZ_S2,  title="Color S2",  group=groupPZ)
+lineWidth        = input.int(1, title="Line Width", group=groupPZ)
+
+// per-level visibility
+groupPZVis = "F1: Pivot Visibility"
+show_pz_r2  = input.bool(true,  "Show R2",  group=groupPZVis)
+show_pz_r1a = input.bool(true,  "Show R1'", group=groupPZVis)
+show_pz_r1  = input.bool(true,  "Show R1",  group=groupPZVis)
+show_pz_bp  = input.bool(true,  "Show BP",  group=groupPZVis)
+show_pz_s1  = input.bool(true,  "Show S1",  group=groupPZVis)
+show_pz_s1a = input.bool(true,  "Show S1'", group=groupPZVis)
+show_pz_s2  = input.bool(true,  "Show S2",  group=groupPZVis)
+
+// labels
+showLabels   = input.bool(true, title="Show Labels", group=groupPZ)
+labelColorIn = input.color(color.rgb(236,239,241), title="Label Color",    group=groupPZ)
+bpLabelColor = input.color(color.rgb(255,209,128), title="BP Label Color", group=groupPZ)
+labelSizeStr = input.string("normal", title="Label Size", options=["tiny","small","normal","large"], group=groupPZ)
+labelOffsetX = input.int(2, title="Label X Offset", group=groupPZ)
+labelSizeEnum = getLabelSize(labelSizeStr)
+
+// Fills (inner bands only)
+groupPZFill = "F2: Pivot Fills"
+show_pz_fill_r1 = input.bool(true,  "Fill R1⇄R1'", group=groupPZFill)
+show_pz_fill_s1 = input.bool(true,  "Fill S1⇄S1'", group=groupPZFill)
+pz_fill_r1_color = input.color(color.new(DEF_PZ_R2, 85), title="R1-R1' Fill", group=groupPZFill)
+pz_fill_s1_color = input.color(color.new(DEF_PZ_S2, 82), title="S1-S1' Fill", group=groupPZFill)
+
+// Pivot series (use previous completed period) — Daily
+PivotClose = request.security(syminfo.tickerid, PivotTerm, close[1], barmerge.gaps_off, barmerge.lookahead_on)
+PivotHigh  = request.security(syminfo.tickerid, PivotTerm, high[1],  barmerge.gaps_off, barmerge.lookahead_on)
+PivotLow   = request.security(syminfo.tickerid, PivotTerm, low[1],   barmerge.gaps_off, barmerge.lookahead_on)
+PivotRange = PivotHigh - PivotLow
+
+bpLevel  = (PivotHigh + PivotLow + PivotClose) / 3.0
+r2Level  = bpLevel + PivotRange
+r1aLevel = bpLevel + PivotRange * 0.618
+r1Level  = bpLevel + PivotRange * 0.5
+s1Level  = bpLevel - PivotRange * 0.5
+s1aLevel = bpLevel - PivotRange * 0.618
+s2Level  = bpLevel - PivotRange
+
+// Hidden plots for fill refs — Daily
+p_pz_r1  = plot(show_pivot and show_pz_r1  ? r1Level  : na, title="PZ R1 (fill ref)",  display=display.none)
+p_pz_s1  = plot(show_pivot and show_pz_s1  ? s1Level  : na, title="PZ S1 (fill ref)",  display=display.none)
+p_pz_r1a = plot(show_pivot and show_pz_r1a ? r1aLevel : na, title="PZ R1' (fill ref)", display=display.none)
+p_pz_s1a = plot(show_pivot and show_pz_s1a ? s1aLevel : na, title="PZ S1' (fill ref)", display=display.none)
+
+fill(p_pz_r1a, p_pz_r1,  color = show_pivot and show_pz_fill_r1 and show_pz_r1 and show_pz_r1a ? pz_fill_r1_color : color.new(color.black, 100))
+fill(p_pz_s1,  p_pz_s1a, color = show_pivot and show_pz_fill_s1 and show_pz_s1 and show_pz_s1a ? pz_fill_s1_color : color.new(color.black, 100))
+
+// Persistent lines/labels — Daily
+var line r2Line  = na
+var line r1aLine = na
+var line r1Line  = na
+var line bpLine  = na
+var line s1Line  = na
+var line s1aLine = na
+var line s2Line  = na
+
+var label r2Label  = na
+var label r1aLabel = na
+var label r1Label  = na
+var label bpLabel  = na
+var label s1Label  = na
+var label s1aLabel = na
+var label s2Label  = na
+
+var bool pz_initialized = false
+
+getLineStyle(string style) =>
+    switch style
+        "solid"  => line.style_solid
+        "dotted" => line.style_dotted
+        "dashed" => line.style_dashed
+
+formatPrice(float price) =>
+    if syminfo.currency == "JPY"
+        str.tostring(price, "#.##")
+    else
+        str.tostring(price, "#.#####")
+
+if show_pivot
+    if not pz_initialized or bpLevel != bpLevel[1]
+        if pz_initialized
+            if not na(r2Line)
+                line.set_x2(r2Line,  bar_index)
+                line.set_extend(r2Line,  extend.none)
+            if not na(r1aLine)
+                line.set_x2(r1aLine, bar_index)
+                line.set_extend(r1aLine, extend.none)
+            if not na(r1Line)
+                line.set_x2(r1Line,  bar_index)
+                line.set_extend(r1Line,  extend.none)
+            if not na(bpLine)
+                line.set_x2(bpLine,  bar_index)
+                line.set_extend(bpLine,  extend.none)
+            if not na(s1Line)
+                line.set_x2(s1Line,  bar_index)
+                line.set_extend(s1Line,  extend.none)
+            if not na(s1aLine)
+                line.set_x2(s1aLine, bar_index)
+                line.set_extend(s1aLine, extend.none)
+            if not na(s2Line)
+                line.set_x2(s2Line,  bar_index)
+                line.set_extend(s2Line,  extend.none)
+
+        // New period lines (extend right) with per-level visibility — Daily
+        r2Line  := show_pz_r2  ? line.new(bar_index, r2Level,  bar_index, r2Level,  color=pivotLineColorR2,  width=lineWidth, style=getLineStyle(pivotLineStyleR2),  extend=extend.right) : na
+        r1aLine := show_pz_r1a ? line.new(bar_index, r1aLevel, bar_index, r1aLevel, color=pivotLineColorR1a, width=lineWidth, style=getLineStyle(pivotLineStyleR1a), extend=extend.right) : na
+        r1Line  := show_pz_r1  ? line.new(bar_index, r1Level,  bar_index, r1Level,  color=pivotLineColorR1,  width=lineWidth, style=getLineStyle(pivotLineStyleR1),  extend=extend.right) : na
+        bpLine  := show_pz_bp  ? line.new(bar_index, bpLevel,  bar_index, bpLevel,  color=pivotLineColorBP,  width=lineWidth, style=getLineStyle(pivotLineStyleBP),  extend=extend.right) : na
+        s1Line  := show_pz_s1  ? line.new(bar_index, s1Level,  bar_index, s1Level,  color=pivotLineColorS1,  width=lineWidth, style=getLineStyle(pivotLineStyleS1),  extend=extend.right) : na
+        s1aLine := show_pz_s1a ? line.new(bar_index, s1aLevel, bar_index, s1aLevel, color=pivotLineColorS1a, width=lineWidth, style=getLineStyle(pivotLineStyleS1a), extend=extend.right) : na
+        s2Line  := show_pz_s2  ? line.new(bar_index, s2Level,  bar_index, s2Level,  color=pivotLineColorS2,  width=lineWidth, style=getLineStyle(pivotLineStyleS2),  extend=extend.right) : na
+
+        if showLabels
+            if not na(r2Label)
+                label.delete(r2Label)
+            if not na(r1aLabel)
+                label.delete(r1aLabel)
+            if not na(r1Label)
+                label.delete(r1Label)
+            if not na(bpLabel)
+                label.delete(bpLabel)
+            if not na(s1Label)
+                label.delete(s1Label)
+            if not na(s1aLabel)
+                label.delete(s1aLabel)
+            if not na(s2Label)
+                label.delete(s2Label)
+
+            if show_pz_r2
+                r2Label  := label.new(bar_index + labelOffsetX, r2Level,  formatPrice(r2Level),  style=label.style_none, textcolor=labelColorIn,   size=labelSizeEnum)
+            if show_pz_r1a
+                r1aLabel := label.new(bar_index + labelOffsetX, r1aLevel, formatPrice(r1aLevel), style=label.style_none, textcolor=labelColorIn,   size=labelSizeEnum)
+            if show_pz_r1
+                r1Label  := label.new(bar_index + labelOffsetX, r1Level,  formatPrice(r1Level),  style=label.style_none, textcolor=labelColorIn,   size=labelSizeEnum)
+            if show_pz_bp
+                bpLabel  := label.new(bar_index + labelOffsetX, bpLevel,  formatPrice(bpLevel),  style=label.style_none, textcolor=bpLabelColor,   size=labelSizeEnum)
+            if show_pz_s1
+                s1Label  := label.new(bar_index + labelOffsetX, s1Level,  formatPrice(s1Level),  style=label.style_none, textcolor=labelColorIn,   size=labelSizeEnum)
+            if show_pz_s1a
+                s1aLabel := label.new(bar_index + labelOffsetX, s1aLevel, formatPrice(s1aLevel), style=label.style_none, textcolor=labelColorIn,   size=labelSizeEnum)
+            if show_pz_s2
+                s2Label  := label.new(bar_index + labelOffsetX, s2Level,  formatPrice(s2Level),  style=label.style_none, textcolor=labelColorIn,   size=labelSizeEnum)
+        pz_initialized := true
+    else
+        if not na(bpLine) and line.get_x2(bpLine) != bar_index
+            if not na(r2Line)
+                line.set_x2(r2Line,  bar_index)
+            if not na(r1aLine)
+                line.set_x2(r1aLine, bar_index)
+            if not na(r1Line)
+                line.set_x2(r1Line,  bar_index)
+            if not na(bpLine)
+                line.set_x2(bpLine,  bar_index)
+            if not na(s1Line)
+                line.set_x2(s1Line,  bar_index)
+            if not na(s1aLine)
+                line.set_x2(s1aLine, bar_index)
+            if not na(s2Line)
+                line.set_x2(s2Line,  bar_index)
+else
+    // cleanup when hidden — Daily
+    if not na(r2Line)
+        line.delete(r2Line)
+    if not na(r1aLine)
+        line.delete(r1aLine)
+    if not na(r1Line)
+        line.delete(r1Line)
+    if not na(bpLine)
+        line.delete(bpLine)
+    if not na(s1Line)
+        line.delete(s1Line)
+    if not na(s1aLine)
+        line.delete(s1aLine)
+    if not na(s2Line)
+        line.delete(s2Line)
+    r2Line := na, r1aLine := na, r1Line := na, bpLine := na, s1Line := na, s1aLine := na, s2Line := na
+
+    if not na(r2Label)
+        label.delete(r2Label)
+    if not na(r1aLabel)
+        label.delete(r1aLabel)
+    if not na(r1Label)
+        label.delete(r1Label)
+    if not na(bpLabel)
+        label.delete(bpLabel)
+    if not na(s1Label)
+        label.delete(s1Label)
+    if not na(s1aLabel)
+        label.delete(s1aLabel)
+    if not na(s2Label)
+        label.delete(s2Label)
+    r2Label := na, r1aLabel := na, r1Label := na, bpLabel := na, s1Label := na, s1aLabel := na, s2Label := na
+    pz_initialized := false
+
+// ==============================
+// F3. Weekly PivotZones（週足ベース、色/透明度を個別設定できるように拡張）
+// ==============================
+
+groupPZW = "F3: Weekly PivotZones"
+show_weekly_pivot = input.bool(true, "Show Weekly PivotZones", group=groupPZW)
+
+// 週足の表示を日足の表示ON/OFF(showLabels等)と独立させたい場合はここで追加できます
+// show_weekly_labels = input.bool(true, "Show Weekly Labels", group=groupPZW)
+
+// --- 週足スタイル設定 ---
+groupPZWStyle = "F3-1: Weekly Style"
+
+// 週足ライン透明度（0=不透明, 100=完全透明）
+weeklyAlpha   = input.int(65, "Weekly Line Transparency (0-100)", minval=0, maxval=100, group=groupPZWStyle)
+weeklyAlphaBP = input.int(70, "Weekly BP Transparency (0-100)",   minval=0, maxval=100, group=groupPZWStyle)
+
+// ★ここが今回の主目的：週足の色を個別入力（defval は const を使う）
+wBaseColorR2  = input.color(DEF_PZ_R2,  "Weekly Color R2",  group=groupPZWStyle)
+wBaseColorR1a = input.color(DEF_PZ_R1A, "Weekly Color R1'", group=groupPZWStyle)
+wBaseColorR1  = input.color(DEF_PZ_R1,  "Weekly Color R1",  group=groupPZWStyle)
+wBaseColorBP  = input.color(DEF_PZ_BP,  "Weekly Color BP",  group=groupPZWStyle)
+wBaseColorS1  = input.color(DEF_PZ_S1,  "Weekly Color S1",  group=groupPZWStyle)
+wBaseColorS1a = input.color(DEF_PZ_S1A, "Weekly Color S1'", group=groupPZWStyle)
+wBaseColorS2  = input.color(DEF_PZ_S2,  "Weekly Color S2",  group=groupPZWStyle)
+
+// 週足ラベル色（0=不透明, 100=完全透明）
+weeklyLabelAlpha  = input.int(75, "Weekly Label Transparency (0-100)", minval=0, maxval=100, group=groupPZWStyle)
+wLabelBaseColor   = input.color(color.rgb(236,239,241), "Weekly Label Color",    group=groupPZWStyle)
+wBPLabelBaseColor = input.color(color.rgb(255,209,128), "Weekly BP Label Color", group=groupPZWStyle)
+
+// 週足フィル
+groupPZWFill = "F3-2: Weekly Fills"
+show_wpz_fill_r1 = input.bool(true, "Weekly Fill R1⇄R1'", group=groupPZWFill)
+show_wpz_fill_s1 = input.bool(true, "Weekly Fill S1⇄S1'", group=groupPZWFill)
+weeklyFillAlpha  = input.int(92, "Weekly Fill Transparency (0-100)", minval=0, maxval=100, group=groupPZWFill)
+wpz_fill_r1_base = input.color(DEF_PZ_R2, "Weekly R1-R1' Fill Base", group=groupPZWFill)
+wpz_fill_s1_base = input.color(DEF_PZ_S2, "Weekly S1-S1' Fill Base", group=groupPZWFill)
+
+// 週足ピボット（直近確定週を使用）
+wClose = request.security(syminfo.tickerid, "W", close[1], barmerge.gaps_off, barmerge.lookahead_on)
+wHigh  = request.security(syminfo.tickerid, "W", high[1],  barmerge.gaps_off, barmerge.lookahead_on)
+wLow   = request.security(syminfo.tickerid, "W", low[1],   barmerge.gaps_off, barmerge.lookahead_on)
+wRange = wHigh - wLow
+
+wbp = (wHigh + wLow + wClose) / 3.0
+wr2 = wbp + wRange
+wr1a= wbp + wRange * 0.618
+wr1 = wbp + wRange * 0.5
+ws1 = wbp - wRange * 0.5
+ws1a= wbp - wRange * 0.618
+ws2 = wbp - wRange
+
+// 入力色 + 透明度で最終色を作る
+wColorR2  = color.new(wBaseColorR2,  weeklyAlpha)
+wColorR1a = color.new(wBaseColorR1a, weeklyAlpha)
+wColorR1  = color.new(wBaseColorR1,  weeklyAlpha)
+wColorBP  = color.new(wBaseColorBP,  weeklyAlphaBP)
+wColorS1  = color.new(wBaseColorS1,  weeklyAlpha)
+wColorS1a = color.new(wBaseColorS1a, weeklyAlpha)
+wColorS2  = color.new(wBaseColorS2,  weeklyAlpha)
+
+wLabelColor   = color.new(wLabelBaseColor, weeklyLabelAlpha)
+wBPLabelColor = color.new(wBPLabelBaseColor, weeklyLabelAlpha)
+
+// 隠しプロット（フィル用）
+p_w_r1  = plot(show_pivot and show_weekly_pivot ? wr1  : na,  title="WPZ R1 (fill ref)",  display=display.none)
+p_w_r1a = plot(show_pivot and show_weekly_pivot ? wr1a : na,  title="WPZ R1' (fill ref)", display=display.none)
+p_w_s1  = plot(show_pivot and show_weekly_pivot ? ws1  : na,  title="WPZ S1 (fill ref)",  display=display.none)
+p_w_s1a = plot(show_pivot and show_weekly_pivot ? ws1a : na,  title="WPZ S1' (fill ref)", display=display.none)
+
+fill(
+    p_w_r1a, p_w_r1,
+    color = show_pivot and show_weekly_pivot and show_wpz_fill_r1
+        ? color.new(wpz_fill_r1_base, weeklyFillAlpha)
+        : color.new(color.black, 100)
+)
+fill(
+    p_w_s1, p_w_s1a,
+    color = show_pivot and show_weekly_pivot and show_wpz_fill_s1
+        ? color.new(wpz_fill_s1_base, weeklyFillAlpha)
+        : color.new(color.black, 100)
+)
+
+// 永続ライン/ラベル（週足）
+var line wr2Line  = na
+var line wr1aLine = na
+var line wr1Line  = na
+var line wbpLine  = na
+var line ws1Line  = na
+var line ws1aLine = na
+var line ws2Line  = na
+
+var label wr2Label  = na
+var label wr1aLabel = na
+var label wr1Label  = na
+var label wbpLabel  = na
+var label ws1Label  = na
+var label ws1aLabel = na
+var label ws2Label  = na
+
+var bool wpz_initialized = false
+
+if show_pivot and show_weekly_pivot
+    if not wpz_initialized or wbp != wbp[1]
+        if wpz_initialized
+            if not na(wr2Line)
+                line.set_x2(wr2Line,  bar_index)
+                line.set_extend(wr2Line,  extend.none)
+            if not na(wr1aLine)
+                line.set_x2(wr1aLine, bar_index)
+                line.set_extend(wr1aLine, extend.none)
+            if not na(wr1Line)
+                line.set_x2(wr1Line,  bar_index)
+                line.set_extend(wr1Line,  extend.none)
+            if not na(wbpLine)
+                line.set_x2(wbpLine,  bar_index)
+                line.set_extend(wbpLine,  extend.none)
+            if not na(ws1Line)
+                line.set_x2(ws1Line,  bar_index)
+                line.set_extend(ws1Line,  extend.none)
+            if not na(ws1aLine)
+                line.set_x2(ws1aLine, bar_index)
+                line.set_extend(ws1aLine, extend.none)
+            if not na(ws2Line)
+                line.set_x2(ws2Line,  bar_index)
+                line.set_extend(ws2Line,  extend.none)
+
+        // 新規確定週ライン（右へ延長）
+        wr2Line  := line.new(bar_index, wr2,  bar_index, wr2,  color=wColorR2,  width=lineWidth, style=getLineStyle(pivotLineStyleR2),  extend=extend.right)
+        wr1aLine := line.new(bar_index, wr1a, bar_index, wr1a, color=wColorR1a, width=lineWidth, style=getLineStyle(pivotLineStyleR1a), extend=extend.right)
+        wr1Line  := line.new(bar_index, wr1,  bar_index, wr1,  color=wColorR1,  width=lineWidth, style=getLineStyle(pivotLineStyleR1),  extend=extend.right)
+        wbpLine  := line.new(bar_index, wbp,  bar_index, wbp,  color=wColorBP,  width=lineWidth, style=getLineStyle(pivotLineStyleBP),  extend=extend.right)
+        ws1Line  := line.new(bar_index, ws1,  bar_index, ws1,  color=wColorS1,  width=lineWidth, style=getLineStyle(pivotLineStyleS1),  extend=extend.right)
+        ws1aLine := line.new(bar_index, ws1a, bar_index, ws1a, color=wColorS1a, width=lineWidth, style=getLineStyle(pivotLineStyleS1a), extend=extend.right)
+        ws2Line  := line.new(bar_index, ws2,  bar_index, ws2,  color=wColorS2,  width=lineWidth, style=getLineStyle(pivotLineStyleS2),  extend=extend.right)
+
+        // 週足ラベル（既存 showLabels に従う）
+        if showLabels
+            if not na(wr2Label)
+                label.delete(wr2Label)
+            if not na(wr1aLabel)
+                label.delete(wr1aLabel)
+            if not na(wr1Label)
+                label.delete(wr1Label)
+            if not na(wbpLabel)
+                label.delete(wbpLabel)
+            if not na(ws1Label)
+                label.delete(ws1Label)
+            if not na(ws1aLabel)
+                label.delete(ws1aLabel)
+            if not na(ws2Label)
+                label.delete(ws2Label)
+
+            wr2Label  := label.new(bar_index + labelOffsetX, wr2,  formatPrice(wr2),  style=label.style_none, textcolor=wLabelColor,   size=labelSizeEnum)
+            wr1aLabel := label.new(bar_index + labelOffsetX, wr1a, formatPrice(wr1a), style=label.style_none, textcolor=wLabelColor,   size=labelSizeEnum)
+            wr1Label  := label.new(bar_index + labelOffsetX, wr1,  formatPrice(wr1),  style=label.style_none, textcolor=wLabelColor,   size=labelSizeEnum)
+            wbpLabel  := label.new(bar_index + labelOffsetX, wbp,  formatPrice(wbp),  style=label.style_none, textcolor=wBPLabelColor, size=labelSizeEnum)
+            ws1Label  := label.new(bar_index + labelOffsetX, ws1,  formatPrice(ws1),  style=label.style_none, textcolor=wLabelColor,   size=labelSizeEnum)
+            ws1aLabel := label.new(bar_index + labelOffsetX, ws1a, formatPrice(ws1a), style=label.style_none, textcolor=wLabelColor,   size=labelSizeEnum)
+            ws2Label  := label.new(bar_index + labelOffsetX, ws2,  formatPrice(ws2),  style=label.style_none, textcolor=wLabelColor,   size=labelSizeEnum)
+
+        wpz_initialized := true
+    else
+        if not na(wbpLine) and line.get_x2(wbpLine) != bar_index
+            if not na(wr2Line)
+                line.set_x2(wr2Line,  bar_index)
+            if not na(wr1aLine)
+                line.set_x2(wr1aLine, bar_index)
+            if not na(wr1Line)
+                line.set_x2(wr1Line,  bar_index)
+            if not na(wbpLine)
+                line.set_x2(wbpLine,  bar_index)
+            if not na(ws1Line)
+                line.set_x2(ws1Line,  bar_index)
+            if not na(ws1aLine)
+                line.set_x2(ws1aLine, bar_index)
+            if not na(ws2Line)
+                line.set_x2(ws2Line,  bar_index)
+else
+    // 非表示時クリーンアップ — Weekly
+    if not na(wr2Line)
+        line.delete(wr2Line)
+    if not na(wr1aLine)
+        line.delete(wr1aLine)
+    if not na(wr1Line)
+        line.delete(wr1Line)
+    if not na(wbpLine)
+        line.delete(wbpLine)
+    if not na(ws1Line)
+        line.delete(ws1Line)
+    if not na(ws1aLine)
+        line.delete(ws1aLine)
+    if not na(ws2Line)
+        line.delete(ws2Line)
+    wr2Line := na, wr1aLine := na, wr1Line := na, wbpLine := na, ws1Line := na, ws1aLine := na, ws2Line := na
+
+    if not na(wr2Label)
+        label.delete(wr2Label)
+    if not na(wr1aLabel)
+        label.delete(wr1aLabel)
+    if not na(wr1Label)
+        label.delete(wr1Label)
+    if not na(wbpLabel)
+        label.delete(wbpLabel)
+    if not na(ws1Label)
+        label.delete(ws1Label)
+    if not na(ws1aLabel)
+        label.delete(ws1aLabel)
+    if not na(ws2Label)
+        label.delete(ws2Label)
+    wr2Label := na, wr1aLabel := na, wr1Label := na, wbpLabel := na, ws1Label := na, ws1aLabel := na, ws2Label := na
+    wpz_initialized := false
+
+// ==============================
+// B. Moving Averages (EMA/SMA)
+// ==============================
+groupMA = "B: Moving Averages"
+ema_length_1 = input.int(10,  "EMA Length 1", group=groupMA, minval=1)
+ma_length_1  = input.int(20,  "MA Length 1",  group=groupMA, minval=1)
+ma_length_2  = input.int(75,  "MA Length 2",  group=groupMA, minval=1)
+ma_length_3  = input.int(200, "MA Length 3",  group=groupMA, minval=1)
+ma_length_4  = input.int(960, "MA Length 4",  group=groupMA, minval=1)
+ma_length_5  = input.int(90,  "MA Length 5",  group=groupMA, minval=1)
+
+// per-line visibility
+groupMAVis = "B1: MA Visibility"
+show_ema = input.bool(true, "Show EMA", group=groupMAVis)
+show_ma1 = input.bool(true, "Show MA1", group=groupMAVis)
+show_ma2 = input.bool(true, "Show MA2", group=groupMAVis)
+show_ma3 = input.bool(true, "Show MA3", group=groupMAVis)
+show_ma4 = input.bool(true, "Show MA4", group=groupMAVis)
+show_ma5 = input.bool(true, "Show MA5", group=groupMAVis)
+
+a1 = ta.ema(close, ema_length_1)
+m1  = ta.sma(close, ma_length_1)
+m2  = ta.sma(close, ma_length_2)
+m3  = ta.sma(close, ma_length_3)
+m4  = ta.sma(close, ma_length_4)
+m5  = ta.sma(close, ma_length_5)
+
+plot(a1, color=bisque,        linewidth=2, title="EMA", display= show_ma and show_ema ? display.all : display.none)
+plot(m1, color=deep_pink,     linewidth=2, title="MA1", display= show_ma and show_ma1 ? display.all : display.none)
+plot(m2, color=color.orange,  linewidth=2, title="MA2", display= show_ma and show_ma2 ? display.all : display.none)
+plot(m3, color=color.yellow,  linewidth=2, title="MA3", display= show_ma and show_ma3 ? display.all : display.none)
+plot(m4, color=color.red,     linewidth=2, title="MA4", display= show_ma and show_ma4 ? display.all : display.none)
+plot(m5, color=color.orange,  linewidth=2, title="MA5", display= show_ma and show_ma5 ? display.all : display.none)
+
+// ==============================
+// E. Ichimoku
+// ==============================
+groupIchi = "E: Ichimoku"
+conversionPeriods   = input.int(9,  minval=1, title="Conversion Line Length", group=groupIchi)
+basePeriods         = input.int(26, minval=1, title="Base Line Length",       group=groupIchi)
+laggingSpan2Periods = input.int(52, minval=1, title="Leading Span B Length",  group=groupIchi)
+displacement        = input.int(26, minval=1, title="Lagging Span",           group=groupIchi)
+
+// per-line visibility
+groupIchiVis = "E1: Ichimoku Visibility"
+show_ichi_conv = input.bool(true,  "Show Conversion Line", group=groupIchiVis)
+show_ichi_base = input.bool(true,  "Show Base Line",       group=groupIchiVis)
+show_ichi_lag  = input.bool(true,  "Show Lagging Span",    group=groupIchiVis)
+show_ichi_la   = input.bool(true,  "Show Leading Span A",  group=groupIchiVis)
+show_ichi_lb   = input.bool(true,  "Show Leading Span B",  group=groupIchiVis)
+show_ichi_kumo = input.bool(true,  "Show Kumo Fill",       group=groupIchiVis)
+
+// Ichimoku calc
+donchian(int len) => math.avg(ta.lowest(len), ta.highest(len))
+conversionLine = donchian(conversionPeriods)
+baseLine       = donchian(basePeriods)
+leadLine1      = math.avg(conversionLine, baseLine)
+leadLine2      = donchian(laggingSpan2Periods)
+
+plot(conversionLine, color=#2962FF, title="Conversion Line", display= show_ichi and show_ichi_conv ? display.all : display.none)
+plot(baseLine,       color=#B71C1C, title="Base Line",       display= show_ichi and show_ichi_base ? display.all : display.none)
+plot(close, offset = -displacement + 1, color=#43A047, title="Lagging Span", display= show_ichi and show_ichi_lag ? display.all : display.none)
+p1 = plot(leadLine1, offset = displacement - 1, color=#A5D6A7, title="Leading Span A", display= show_ichi and show_ichi_la ? display.all : display.none)
+p2 = plot(leadLine2, offset = displacement - 1, color=#EF9A9A, title="Leading Span B", display= show_ichi and show_ichi_lb ? display.all : display.none)
+
+kumoColor = leadLine1 > leadLine2 ? color.rgb(67,160,71,90) : color.rgb(244,67,54,90)
+fill(p1, p2, color= show_ichi and show_ichi_kumo ? kumoColor : color.new(color.white, 100))

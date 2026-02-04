@@ -1,0 +1,178 @@
+//@version=6
+indicator("RSI & RCI (4-line) – Full RSI Features", overlay=false)
+
+// ==============================
+// A. Visibility
+// ==============================
+gVis = "A: Visibility"
+show_rsi = input.bool(true,  "Show RSI",            group=gVis)
+show_rci = input.bool(false,  "Show RCI (4 lines)",  group=gVis)
+
+// ==============================
+// B. RSI (with official features)
+// ==============================
+RSI_GRP = "B: RSI Settings"
+rsiLengthInput      = input.int(14, minval=1, title="RSI Length", group=RSI_GRP)
+rsiSourceInput      = input.source(close, "Source", group=RSI_GRP)
+calculateDivergence = input.bool(false, title="Calculate Divergence", group=RSI_GRP, display=display.data_window, tooltip="Calculating divergences is needed in order for divergence alerts to fire.")
+
+// RSI calc (manual to match reference)
+_change = ta.change(rsiSourceInput)
+_up  = ta.rma(math.max(_change, 0), rsiLengthInput)
+_down= ta.rma(-math.min(_change, 0), rsiLengthInput)
+rsi = _down == 0 ? 100 : _up == 0 ? 0 : 100 - (100 / (1 + _up / _down))
+
+// RSI plots & levels
+rsiPlot = plot(rsi, "RSI", color=#7E57C2, display= show_rsi ? display.all : display.none)
+rsiUpperBand = hline(70, "RSI Upper Band", color=#787B86, display= show_rsi ? display.all : display.none)
+midline      = hline(50, "RSI Middle Band", color=color.new(#787B86, 50), display= show_rsi ? display.all : display.none)
+rsiLowerBand = hline(30, "RSI Lower Band", color=#787B86, display= show_rsi ? display.all : display.none)
+fill(rsiUpperBand, rsiLowerBand, color=color.rgb(126, 87, 194, 90), title="RSI Background Fill", display= show_rsi ? display.all : display.none)
+midLinePlot = plot(50, color=na, editable=false, display=display.none)
+fill(rsiPlot, midLinePlot, 100, 70, top_color=color.new(color.green, 0),   bottom_color=color.new(color.green, 100), title="Overbought Gradient Fill", display= show_rsi ? display.all : display.none)
+fill(rsiPlot, midLinePlot, 30,   0, top_color=color.new(color.red,   100), bottom_color=color.new(color.red,   0),   title="Oversold Gradient Fill",   display= show_rsi ? display.all : display.none)
+
+// Smoothing MA inputs
+SM_GRP = "C: RSI Smoothing"
+TT_BB = "Only applies when 'SMA + Bollinger Bands' is selected. Determines the distance between the SMA and the bands."
+maTypeInput = input.string("SMA", "Type", options=["None","SMA","SMA + Bollinger Bands","EMA","SMMA (RMA)","WMA","VWMA"], group=SM_GRP, display=display.data_window)
+bool isBB    = maTypeInput == "SMA + Bollinger Bands"
+maLengthInput = input.int(14, "Length", group=SM_GRP, display=display.data_window, active = maTypeInput != "None")
+bbMultInput  = input.float(2.0, "BB StdDev", minval=0.001, maxval=50, step=0.5, tooltip=TT_BB, group=SM_GRP, display=display.data_window, active = isBB)
+bool enableMA = maTypeInput != "None"
+
+ma(source, length, MAtype) =>
+    switch MAtype
+        "SMA"                   => ta.sma(source, length)
+        "SMA + Bollinger Bands" => ta.sma(source, length)
+        "EMA"                   => ta.ema(source, length)
+        "SMMA (RMA)"            => ta.rma(source, length)
+        "WMA"                   => ta.wma(source, length)
+        "VWMA"                  => ta.vwma(source, length)
+
+smoothingMA    = enableMA ? ma(rsi, maLengthInput, maTypeInput) : na
+smoothingStDev = isBB ? ta.stdev(rsi, maLengthInput) * bbMultInput : na
+plot(smoothingMA, "RSI-based MA", color=color.yellow, display = (show_rsi and enableMA) ? display.all : display.none, editable=enableMA)
+bbUpperBand = plot(smoothingMA + smoothingStDev, title="Upper Bollinger Band", color=color.green, display = (show_rsi and isBB) ? display.all : display.none, editable=isBB)
+bbLowerBand = plot(smoothingMA - smoothingStDev, title="Lower Bollinger Band", color=color.green, display = (show_rsi and isBB) ? display.all : display.none, editable=isBB)
+fill(bbUpperBand, bbLowerBand, color = isBB and show_rsi ? color.new(color.green, 90) : na, title="Bollinger Bands Background Fill", display = (show_rsi and isBB) ? display.all : display.none, editable=isBB)
+
+// Divergence (Regular Bullish/Bearish)
+lookbackRight = 5
+lookbackLeft  = 5
+rangeUpper    = 60
+rangeLower    = 5
+bearColor     = color.red
+bullColor     = color.green
+textColor     = color.white
+noneColor     = color.new(color.white, 100)
+
+_inRange(bool cond) =>
+    bars = ta.barssince(cond)
+    rangeLower <= bars and bars <= rangeUpper
+
+var bool plFound = false
+var bool phFound = false
+var bool bullCond = false
+var bool bearCond = false
+
+rsiLBR = rsi[lookbackRight]
+
+if show_rsi and calculateDivergence
+    // Regular Bullish (RSI HL vs Price LL)
+    plFound := not na(ta.pivotlow(rsi, lookbackLeft, lookbackRight))
+    rsiHL   = rsiLBR > ta.valuewhen(plFound, rsiLBR, 1) and _inRange(plFound[1])
+    lowLBR  = low[lookbackRight]
+    priceLL = lowLBR < ta.valuewhen(plFound, lowLBR, 1)
+    bullCond := priceLL and rsiHL and plFound
+
+    // Regular Bearish (RSI LH vs Price HH)
+    phFound := not na(ta.pivothigh(rsi, lookbackLeft, lookbackRight))
+    rsiLH   = rsiLBR < ta.valuewhen(phFound, rsiLBR, 1) and _inRange(phFound[1])
+    highLBR = high[lookbackRight]
+    priceHH = highLBR > ta.valuewhen(phFound, highLBR, 1)
+    bearCond := priceHH and rsiLH and phFound
+
+plot(plFound and show_rsi and calculateDivergence ? rsiLBR : na,
+     offset    = -lookbackRight,
+     title     = "Regular Bullish",
+     linewidth = 2,
+     color     = (bullCond ? bullColor : noneColor),
+     display   = (show_rsi and calculateDivergence) ? display.pane : display.none,
+     editable  = calculateDivergence)
+
+plotshape(bullCond and show_rsi and calculateDivergence ? rsiLBR : na,
+     offset    = -lookbackRight,
+     title     = "Regular Bullish Label",
+     text      = " Bull ",
+     style     = shape.labelup,
+     location  = location.absolute,
+     color     = bullColor,
+     textcolor = textColor,
+     display   = (show_rsi and calculateDivergence) ? display.pane : display.none,
+     editable  = calculateDivergence)
+
+plot(phFound and show_rsi and calculateDivergence ? rsiLBR : na,
+     offset    = -lookbackRight,
+     title     = "Regular Bearish",
+     linewidth = 2,
+     color     = (bearCond ? bearColor : noneColor),
+     display   = (show_rsi and calculateDivergence) ? display.pane : display.none,
+     editable  = calculateDivergence)
+
+plotshape(bearCond and show_rsi and calculateDivergence ? rsiLBR : na,
+     offset    = -lookbackRight,
+     title     = "Regular Bearish Label",
+     text      = " Bear ",
+     style     = shape.labeldown,
+     location  = location.absolute,
+     color     = bearColor,
+     textcolor = textColor,
+     display   = (show_rsi and calculateDivergence) ? display.pane : display.none,
+     editable  = calculateDivergence)
+
+alertcondition(bullCond and show_rsi and calculateDivergence, title='Regular Bullish Divergence', message="Found a new Regular Bullish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.")
+alertcondition(bearCond and show_rsi and calculateDivergence, title='Regular Bearish Divergence', message='Found a new Regular Bearish Divergence, `Pivot Lookback Right` number of bars to the left of the current bar.')
+
+// ==============================
+// D: RCI (Rank Correlation Index) – 4 lines（標準 ta.rci に統一）
+// ==============================
+RCI_GRP = "D: RCI"
+len1 = input.int(7,  "RCI Length 1",  minval=2, group=RCI_GRP)
+len2 = input.int(9,  "RCI Length 2",  minval=2, group=RCI_GRP)
+len3 = input.int(26, "RCI Length 3",  minval=2, group=RCI_GRP)
+len4 = input.int(52, "RCI Length 4",  minval=2, group=RCI_GRP)
+rciSrc = input.source(close, "RCI Source", group=RCI_GRP)
+
+// プロット用スタイル
+colRCI1 = input.color(color.new(color.teal,   0), "RCI Color 1", group=RCI_GRP)
+colRCI2 = input.color(color.new(color.orange, 0), "RCI Color 2", group=RCI_GRP)
+colRCI3 = input.color(color.new(color.purple, 0), "RCI Color 3", group=RCI_GRP)
+colRCI4 = input.color(color.new(color.yellow, 0), "RCI Color 4", group=RCI_GRP)
+lineWidthRCI = input.int(1, "Line Width", minval=1, maxval=5, group=RCI_GRP)
+
+// 視覚オフセット（表示位置だけをずらす。計算は現在バー基準）
+vis_grp = "D1: RCI Visual"
+rci_visual_offset = input.int(0, "Visual Offset (bars)", minval=-50, maxval=50, group=vis_grp,
+     tooltip="表示だけを前後にずらす。0で標準（ズレ無し）。マイナスで右、プラスで左にシフト。")
+
+// 標準RCI（TradingView組み込み）
+rci1 = ta.rci(rciSrc, len1)
+rci2 = ta.rci(rciSrc, len2)
+rci3 = ta.rci(rciSrc, len3)
+rci4 = ta.rci(rciSrc, len4)
+
+// プロット
+plot(show_rci ? rci1 : na, title="RCI 1", color=colRCI1, linewidth=lineWidthRCI, offset=rci_visual_offset)
+plot(show_rci ? rci2 : na, title="RCI 2", color=colRCI2, linewidth=lineWidthRCI, offset=rci_visual_offset)
+plot(show_rci ? rci3 : na, title="RCI 3", color=colRCI3, linewidth=lineWidthRCI, offset=rci_visual_offset)
+plot(show_rci ? rci4 : na, title="RCI 4", color=colRCI4, linewidth=lineWidthRCI, offset=rci_visual_offset)
+
+// ガイドライン（±80はRCI3linesに合わせた目安）
+guide_grp = "D2: RCI Guides"
+show_rci_guides = input.bool(true, "Show Guide Lines", group=guide_grp)
+rci_upper = input.float(80.0, "High line [%]", group=guide_grp)
+rci_lower = input.float(-80.0, "Low line  [%]", group=guide_grp)
+hline(show_rci and show_rci_guides ? rci_upper : na, "RCI +80", color=color.new(color.gray, 40), linestyle=hline.style_dashed)
+hline(show_rci and show_rci_guides ? 0 : na,        "RCI 0",   color=color.new(color.gray, 70))
+hline(show_rci and show_rci_guides ? rci_lower : na, "RCI -80", color=color.new(color.gray, 40), linestyle=hline.style_dashed)
